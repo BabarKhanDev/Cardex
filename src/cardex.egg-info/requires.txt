@@ -8,6 +8,6 @@ torchvision~=0.18.1
 tqdm~=4.66.1
 scikit-learn~=1.5.0
 pgvector~=0.2.5
-pokemontcgsdk~=3.4.0
+pokemontcgsdk
 requests~=2.32.3
-psycopg
+psycopg[binary,pool]

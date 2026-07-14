@@ -1,0 +1,30 @@
+[project]
+name = "cardex"
+version = "0.0.1"
+requires-python = ">=3.12.0,<3.13"
+dependencies = [
+    "Flask~=3.0.0",
+    "Flask-Cors==4.0.0",     
+    "Pillow~=10.1.0",
+    "opencv-python-headless",
+    "numpy~=1.26.2",
+    "torch~=2.3.1",
+    "torchvision~=0.18.1",
+    "tqdm~=4.66.1",
+    "scikit-learn~=1.5.0",
+    "pgvector~=0.2.5",
+    "pokemontcgsdk",
+    "requests~=2.32.3",
+    "psycopg[binary,pool]",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"

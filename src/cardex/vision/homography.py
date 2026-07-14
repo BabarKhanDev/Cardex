@@ -1,30 +1,18 @@
 import cv2 as cv
 import numpy as np
-from sklearn import linear_model
-from multiprocessing import Value
-
-import psycopg
-from pgvector.psycopg import register_vector
-from uuid import uuid1
-
-import torch
-from torchvision.models import vgg16, VGG16_Weights
-from torchvision import transforms
 from PIL import Image
+from sklearn import linear_model
 
 image_scale = 0.2
-
-
-def find_cards(image):
-    # TODO image -> []card_img
-    pass
 
 
 # Calculate and return a 2d image with the edges highlighted in white, else black
 def detect_edges(img) -> cv.typing.MatLike:
     global image_scale
 
-    img = cv.resize(img, dsize=(9, 0), fx=image_scale, fy=image_scale, interpolation=cv.INTER_CUBIC)
+    img = cv.resize(
+        img, dsize=(9, 0), fx=image_scale, fy=image_scale, interpolation=cv.INTER_CUBIC
+    )
     img_blur = cv.GaussianBlur(img, (3, 3), 0)
     edges = cv.Canny(image=img_blur, threshold1=80, threshold2=80)
     return edges
@@ -32,7 +20,9 @@ def detect_edges(img) -> cv.typing.MatLike:
 
 # This is less precise than ransac, but it is more robust
 # It will give us lots of area around the card
-def bounding_box_from_edges(edges: cv.typing.MatLike, outlier_percent:int = 1) -> (np.ndarray | None):
+def bounding_box_from_edges(
+    edges: cv.typing.MatLike, outlier_percent: int = 1
+) -> np.ndarray | None:
     global image_scale
 
     # Handle the case when there are no edges present
@@ -57,12 +47,7 @@ def bounding_box_from_edges(edges: cv.typing.MatLike, outlier_percent:int = 1) -
     min_y = np.min(y_without_outliers) / image_scale
     max_y = np.max(y_without_outliers) / image_scale
 
-    return np.array([
-        (max_x, max_y),
-        (max_x, min_y),
-        (min_x, max_y),
-        (min_x, min_y)
-    ])
+    return np.array([(max_x, max_y), (max_x, min_y), (min_x, max_y), (min_x, min_y)])
 
 
 def corners_from_edges(edges) -> np.ndarray:
@@ -142,15 +127,17 @@ def corners_from_edges(edges) -> np.ndarray:
     bottom_left_x = (left_intercept - bottom_intercept) / (bottom_coef - left_coef)
     bottom_left_y = bottom_coef * bottom_left_x + bottom_intercept
 
-    return np.array([
-        (round(bottom_right_x.item()), round(bottom_right_y.item())),
-        (round(top_right_x.item()), round(top_right_y.item())),
-        (round(bottom_left_x.item()), round(bottom_left_y.item())),
-        (round(top_left_x.item()), round(top_left_y.item()))
-    ])
+    return np.array(
+        [
+            (round(bottom_right_x.item()), round(bottom_right_y.item())),
+            (round(top_right_x.item()), round(top_right_y.item())),
+            (round(bottom_left_x.item()), round(bottom_left_y.item())),
+            (round(top_left_x.item()), round(top_left_y.item())),
+        ]
+    )
 
 
-def create_homography(image: Image) -> Image:
+def create_homography(image: Image.Image) -> Image.Image:
 
     # Get corners of the card
     np_image = np.array(image)
@@ -162,86 +149,9 @@ def create_homography(image: Image) -> Image:
     pts_dst = np.array([(W, H), (W, 0), (0, H), (0, 0)])
     h, _ = cv.findHomography(pts_src, pts_dst)
     card_homography = cv.warpPerspective(np_image, h, (W, H))
-    card_homography = cv.resize(card_homography, (300, 400), card_homography, interpolation=cv.INTER_AREA)
-    image = Image.fromarray(card_homography.astype('uint8'), 'RGB')
+    card_homography = cv.resize(
+        card_homography, (300, 400), card_homography, interpolation=cv.INTER_AREA
+    )
+    image = Image.fromarray(card_homography.astype("uint8"), "RGB")
 
     return image
-
-
-def create_model_and_preprocess():
-
-    # Create Model
-    weights = VGG16_Weights.IMAGENET1K_V1
-    model = vgg16(weights=weights)
-    model.eval()
-    model.classifier = model.classifier[0]
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-
-    # # Built in transforms are a bit weird, they crop the image rather than squeezing it
-    # # Create inference transforms
-    # preprocess = transforms.Compose([
-    #     weights.transforms()
-    # ])
-
-    # Create inference transforms
-    def crop(image):
-        return transforms.functional.crop(image, 0, 0, 256, 256)
-
-    preprocess = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Resize((512, 256), antialias=True),
-        transforms.Lambda(crop),
-        transforms.Normalize(0.5, 0.5)
-    ])
-
-    return model, preprocess, device
-
-
-def create_feature_vector(homography_img: Image) -> np.ndarray:
-    model, preprocess, device = create_model_and_preprocess()
-    batch = preprocess(homography_img).unsqueeze(0).to(device)
-    features = model(batch).to(device).squeeze(0)
-    return features.cpu().detach().numpy().ravel()
-
-
-def find_closest_cards(config, feature_vector: np.ndarray) -> [str]:
-    with psycopg.connect(**config) as conn:
-        register_vector(conn)
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM sdk_cache.card ORDER BY features <+> %s LIMIT 5;", (feature_vector,))
-            response = cur.fetchall()
-
-            return [card[0] for card in response]
-
-
-def process_upload(config, image: Image, image_processing_count: Value, user_card_dir: str = "static/user_cards/") -> [str]:
-    # TODO potential improvements:
-    #   Use text within the image
-    #   Compare the features of the top half of the image -> most cards only have images in the top half
-    #   Try and get the series of the card
-
-    # Create homography and save that to disc, we can then show this to users in front-end
-    image_name = str(uuid1()) + ".png"
-    image.save(f"static/user_cards_raw/{image_name}", "PNG")
-    homography = create_homography(image)
-    homography.save(f"{user_card_dir}{image_name}", "PNG")
-
-    # Calculate features and find close matches
-    features = create_feature_vector(homography)
-    card_ids = find_closest_cards(config, features)
-
-    # Create db entries
-    with psycopg.connect(**config) as conn:
-        with conn.cursor() as cur:
-            cur.execute("insert into user_data.upload (image_path) values (%s);", (image_name,))
-            cur.execute("select id from user_data.upload where image_path = %s", (image_name,))
-            upload_id = cur.fetchone()[0]
-
-            for card_id in card_ids:
-                cur.execute("""
-                insert into user_data.match (card_id, upload_id) values (%s, %s);
-                """, (card_id, upload_id,))
-
-    image_processing_count.value -= 1
