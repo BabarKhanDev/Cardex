@@ -1,4 +1,4 @@
-﻿# Card Tracker
+﻿# Cardex
 I'm building this app because I'm unsatisfied with existing card tracking solutions. 
 I want to be able to take photos of my cards and have them tracked automatically. 
 I also want to be able to take photos of a binder of cards and have that uploaded automatically.
